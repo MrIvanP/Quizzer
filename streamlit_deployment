@@ -1,271 +1,404 @@
-import streamlit as st
+import tkinter as tk
+from tkinter import ttk, simpledialog, messagebox
 import json
 import os
 import random
 
 DATA_FILE = "vocab_data.json"
 
+# Initialize data if file doesn't exist
+if not os.path.exists(DATA_FILE):
+    with open(DATA_FILE, "w") as f:
+        json.dump({}, f)
+
 def load_data():
     if not os.path.exists(DATA_FILE):
         return {}
-    with open(DATA_FILE, "r") as f:
-        return json.load(f)
+    try:
+        with open(DATA_FILE, "r") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        messagebox.showerror("Data Error", "Failed to load data file. Resetting data.")
+        return {}
 
 def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+    try:
+        with open(DATA_FILE, "w") as f:
+            json.dump(data, f, indent=4)
+    except Exception as e:
+        messagebox.showerror("Save Error", f"Failed to save data: {e}")
 
-# Helper functions for UI
+class VocabApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Vocabulary Tree Quiz App")
+        self.data = load_data()
 
-def select_course(data, key="course"):
-    courses = list(data.keys())
-    if not courses:
-        st.warning("No courses found. Please add one.")
-        return None
-    return st.selectbox("Select Course", courses, key=key)
+        self.setup_styles()
+        self.setup_ui()
+        self.build_tree()
 
-def select_book(data, course, key="book"):
-    books = list(data.get(course, {}).keys())
-    if not books:
-        st.warning("No books found in this course. Please add one.")
-        return None
-    return st.selectbox("Select Book", books, key=key)
+    def setup_styles(self):
+        self.style = ttk.Style()
+        self.style.configure("Quiz.TRadiobutton", background="white")
+        self.style.configure("Correct.TRadiobutton", background="pale green")
+        self.style.configure("Incorrect.TRadiobutton", background="tomato")
 
-def add_course(data):
-    with st.expander("Add New Course"):
-        new_course = st.text_input("Course Name", key="new_course")
-        if st.button("Add Course"):
-            if not new_course.strip():
-                st.error("Course name cannot be empty.")
-            elif new_course in data:
-                st.error("Course already exists.")
-            else:
-                data[new_course] = {}
-                save_data(data)
-                st.success(f"Course '{new_course}' added.")
-                st.experimental_rerun()
+    def setup_ui(self):
+        self.tree = ttk.Treeview(self.root)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-def add_book(data, course):
-    if course:
-        with st.expander("Add New Book"):
-            new_book = st.text_input("Book Name", key="new_book")
-            if st.button("Add Book"):
-                if not new_book.strip():
-                    st.error("Book name cannot be empty.")
-                elif new_book in data[course]:
-                    st.error("Book already exists in this course.")
-                else:
-                    data[course][new_book] = {}
-                    save_data(data)
-                    st.success(f"Book '{new_book}' added to course '{course}'.")
-                    st.experimental_rerun()
+        scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.LEFT, fill=tk.Y)
 
-def add_term(data, course, book):
-    if course and book:
-        with st.expander("Add New Term"):
-            new_term = st.text_input("Term", key="new_term")
-            new_def = st.text_area("Definition", key="new_def")
-            if st.button("Add Term"):
-                if not new_term.strip() or not new_def.strip():
-                    st.error("Term and definition cannot be empty.")
-                elif new_term in data[course][book]:
-                    st.error("Term already exists in this book.")
-                else:
-                    data[course][book][new_term] = new_def
-                    save_data(data)
-                    st.success(f"Term '{new_term}' added to book '{book}'.")
-                    st.experimental_rerun()
+        btn_frame = tk.Frame(self.root)
+        btn_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=10)
 
-def rename_key(d, old_key, new_key):
-    d[new_key] = d.pop(old_key)
+        ttk.Button(btn_frame, text="Add Course", command=self.add_course).pack(pady=5, fill='x')
+        ttk.Button(btn_frame, text="Add Book", command=self.add_book).pack(pady=5, fill='x')
+        ttk.Button(btn_frame, text="Add Term", command=self.add_term).pack(pady=5, fill='x')
+        ttk.Button(btn_frame, text="Start Quiz", command=self.start_quiz).pack(pady=10, fill='x')
 
-def manage_items(data, course, book):
-    st.markdown("### Manage Items")
-    if course:
-        st.subheader(f"Course: {course}")
-        # Rename or delete course
-        col1, col2 = st.columns(2)
-        with col1:
-            new_course_name = st.text_input("Rename Course", value=course)
-            if st.button("Rename Course"):
-                if new_course_name and new_course_name != course:
-                    if new_course_name in data:
-                        st.error("Course name already exists.")
-                    else:
-                        rename_key(data, course, new_course_name)
-                        save_data(data)
-                        st.success("Course renamed.")
-                        st.experimental_rerun()
-        with col2:
-            if st.button("Delete Course"):
-                if st.confirm("Are you sure you want to delete this course and all its content?"):
-                    data.pop(course)
-                    save_data(data)
-                    st.success("Course deleted.")
-                    st.experimental_rerun()
+        self.menu = tk.Menu(self.root, tearoff=0)
+        self.menu.add_command(label="Add Book", command=self.add_book)
+        self.menu.add_command(label="Add Term", command=self.add_term)
+        self.menu.add_separator()
+        self.menu.add_command(label="Rename", command=self.rename_item)
+        self.menu.add_command(label="Delete", command=self.delete_item)
 
-    if course and book:
-        st.subheader(f"Book: {book}")
-        col1, col2 = st.columns(2)
-        with col1:
-            new_book_name = st.text_input("Rename Book", value=book)
-            if st.button("Rename Book"):
-                if new_book_name and new_book_name != book:
-                    if new_book_name in data[course]:
-                        st.error("Book name already exists in this course.")
-                    else:
-                        rename_key(data[course], book, new_book_name)
-                        save_data(data)
-                        st.success("Book renamed.")
-                        st.experimental_rerun()
-        with col2:
-            if st.button("Delete Book"):
-                if st.confirm("Are you sure you want to delete this book and all its terms?"):
-                    data[course].pop(book)
-                    save_data(data)
-                    st.success("Book deleted.")
-                    st.experimental_rerun()
+        self.tree.bind("<Button-3>", self.show_context_menu)
 
-    if course and book:
-        terms = list(data[course][book].keys())
-        if terms:
-            st.subheader("Terms")
-            for term in terms:
-                col1, col2 = st.columns([3,1])
-                with col1:
-                    new_term_name = st.text_input(f"Rename Term '{term}'", value=term, key=f"rename_{term}")
-                with col2:
-                    if st.button(f"Delete Term '{term}'", key=f"delete_{term}"):
-                        if st.confirm(f"Delete term '{term}'?"):
-                            data[course][book].pop(term)
-                            save_data(data)
-                            st.success(f"Term '{term}' deleted.")
-                            st.experimental_rerun()
-                if new_term_name != term:
-                    if new_term_name in data[course][book]:
-                        st.error(f"Term '{new_term_name}' already exists.")
-                    elif new_term_name.strip():
-                        # Rename term
-                        data[course][book][new_term_name] = data[course][book].pop(term)
-                        save_data(data)
-                        st.success(f"Term '{term}' renamed to '{new_term_name}'.")
-                        st.experimental_rerun()
+    def build_tree(self):
+        self.tree.delete(*self.tree.get_children())
+        for course in self.data:
+            course_id = self.tree.insert("", "end", text=course, open=True)
+            for book in self.data[course]:
+                book_id = self.tree.insert(course_id, "end", text=book, open=False)
+                for term in self.data[course][book]:
+                    self.tree.insert(book_id, "end", text=term, open=False)
+
+    def show_context_menu(self, event):
+        selected_item = self.tree.identify_row(event.y)
+        if selected_item:
+            self.tree.selection_set(selected_item)
+            self.menu.post(event.x_root, event.y_root)
+
+    def get_selected_path(self):
+        selected = self.tree.selection()
+        if not selected:
+            return None, None, None
+
+        item = selected[0]
+        parent = self.tree.parent(item)
+        grandparent = self.tree.parent(parent) if parent else None
+
+        if grandparent:  # term level
+            course = self.tree.item(grandparent, "text")
+            book = self.tree.item(parent, "text")
+            term = self.tree.item(item, "text")
+            return course, book, term
+        elif parent:  # book level
+            course = self.tree.item(parent, "text")
+            book = self.tree.item(item, "text")
+            return course, book, None
+        else:  # course level
+            course = self.tree.item(item, "text")
+            return course, None, None
+
+    def get_item_depth(self, item):
+        depth = 0
+        current = item
+        while self.tree.parent(current):
+            depth += 1
+            current = self.tree.parent(current)
+        return depth
+
+    def add_course(self):
+        course = simpledialog.askstring("New Course", "Enter course name:")
+        if not course:
+            return
+        if course in self.data:
+            messagebox.showwarning("Duplicate", "Course already exists.")
+            return
+        self.data[course] = {}
+        save_data(self.data)
+        self.build_tree()
+
+    def add_book(self):
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showwarning("Select Course", "Select a course or book to add a book.")
+            return
+
+        item = selected[0]
+        depth = self.get_item_depth(item)
+
+        if depth == 0:
+            course = self.tree.item(item, "text")
+        elif depth == 1:
+            course = self.tree.item(self.tree.parent(item), "text")
         else:
-            st.info("No terms in this book yet.")
+            messagebox.showwarning("Invalid", "Select a course or book to add a book.")
+            return
 
-def quiz(data, course, book):
-    st.header("Start Quiz")
-    if not course or not book:
-        st.warning("Please select a course and a book first.")
-        return
+        book = simpledialog.askstring("New Book", "Enter book name:")
+        if not book:
+            return
+        if book in self.data[course]:
+            messagebox.showwarning("Duplicate", "Book already exists in this course.")
+            return
+        self.data[course][book] = {}
+        save_data(self.data)
+        self.build_tree()
 
-    terms = list(data[course][book].items())
-    if len(terms) < 2:
-        st.info("Need at least 2 terms to start a quiz.")
-        return
+    def add_term(self):
+        course, book, _ = self.get_selected_path()
+        if not course or not book:
+            messagebox.showwarning("Select Book", "Select a book to add a term.")
+            return
 
-    all_terms = [term for term, _ in terms]
+        term = simpledialog.askstring("New Term", "Enter term:")
+        if not term:
+            return
+        if term in self.data[course][book]:
+            messagebox.showwarning("Duplicate", "Term already exists.")
+            return
 
-    subset_mode = st.radio("Quiz Mode", ["All Terms", "Custom Subset"])
-    if subset_mode == "Custom Subset":
-        selected_terms = st.multiselect("Select terms to quiz", all_terms, default=all_terms)
-    else:
-        selected_terms = all_terms
+        definition = simpledialog.askstring("Definition", f"Enter definition for '{term}':")
+        if not definition:
+            return
 
-    # Prepare quiz data
-    quiz_terms = [(term, data[course][book][term]) for term in selected_terms]
+        self.data[course][book][term] = definition
+        save_data(self.data)
+        self.build_tree()
 
-    if "quiz_state" not in st.session_state:
-        st.session_state.quiz_state = {
-            "terms": random.sample(quiz_terms, len(quiz_terms)),
-            "index": 0,
-            "score": 0,
-            "show_answer": False,
-            "selected_answer": None,
-            "quiz_active": False
-        }
+    def rename_item(self):
+        selected = self.tree.selection()
+        if not selected:
+            return
+        item = selected[0]
+        old_name = self.tree.item(item, "text")
+        parent = self.tree.parent(item)
+        new_name = simpledialog.askstring("Rename", f"Rename '{old_name}' to:")
+        if not new_name or new_name == old_name:
+            return
 
-    state = st.session_state.quiz_state
+        depth = self.get_item_depth(item)
 
-    def reset_quiz():
-        state["terms"] = random.sample(quiz_terms, len(quiz_terms))
-        state["index"] = 0
-        state["score"] = 0
-        state["show_answer"] = False
-        state["selected_answer"] = None
-        state["quiz_active"] = True
+        try:
+            if depth == 0:  # Course
+                if new_name in self.data:
+                    messagebox.showerror("Error", "Course already exists.")
+                    return
+                self.data[new_name] = self.data.pop(old_name)
 
-    if not state["quiz_active"]:
-        if st.button("Start Quiz"):
-            reset_quiz()
-    else:
-        term, correct_def = state["terms"][state["index"]]
+            elif depth == 1:  # Book
+                course = self.tree.item(parent, "text")
+                if new_name in self.data[course]:
+                    messagebox.showerror("Error", "Book already exists.")
+                    return
+                self.data[course][new_name] = self.data[course].pop(old_name)
 
-        st.markdown(f"### What is the definition of:\n\n**{term}**")
+            elif depth == 2:  # Term
+                book = self.tree.item(parent, "text")
+                course = self.tree.item(self.tree.parent(parent), "text")
+                if new_name in self.data[course][book]:
+                    messagebox.showerror("Error", "Term already exists.")
+                    return
+                self.data[course][book][new_name] = self.data[course][book].pop(old_name)
 
-        # Build options with 3 random incorrect defs + 1 correct def
-        other_defs = [d for t, d in quiz_terms if d != correct_def]
-        options = random.sample(other_defs, min(3, len(other_defs))) + [correct_def]
-        random.shuffle(options)
+            save_data(self.data)
+            self.build_tree()
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
 
-        choice = st.radio("Choose an answer:", options, index=options.index(state["selected_answer"]) if state["selected_answer"] in options else 0, key="answer_choice")
+    def delete_item(self):
+        selected = self.tree.selection()
+        if not selected:
+            return
+        item = selected[0]
+        name = self.tree.item(item, "text")
+        parent = self.tree.parent(item)
 
-        if not state["show_answer"]:
-            if st.button("Submit"):
-                state["selected_answer"] = choice
-                state["show_answer"] = True
-                if choice == correct_def:
-                    state["score"] += 1
+        depth = self.get_item_depth(item)
+
+        confirm = messagebox.askyesno("Delete", f"Are you sure you want to delete '{name}'?")
+        if not confirm:
+            return
+
+        try:
+            if depth == 0:  # Course
+                self.data.pop(name)
+            elif depth == 1:  # Book
+                course = self.tree.item(parent, "text")
+                self.data[course].pop(name)
+            elif depth == 2:  # Term
+                book = self.tree.item(parent, "text")
+                course = self.tree.item(self.tree.parent(parent), "text")
+                self.data[course][book].pop(name)
+
+            save_data(self.data)
+            self.build_tree()
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def start_quiz(self):
+        course, book, _ = self.get_selected_path()
+        if not course or not book:
+            messagebox.showwarning("Select Book", "Select a book to start quiz.")
+            return
+
+        all_terms = list(self.data[course][book].items())
+        if len(all_terms) < 2:
+            messagebox.showinfo("Not enough terms", "You need at least 2 terms for a quiz.")
+            return
+
+        choice = messagebox.askquestion(
+            "Quiz Scope",
+            "Would you like to be quizzed on all terms in this book?\n\n"
+            "Select 'No' to choose a custom subset."
+        )
+
+        if choice == "no":
+            dialog = TermSelectionDialog(self.root, all_terms)
+            terms = dialog.selected_terms
+            if not terms or len(terms) < 2:
+                messagebox.showinfo("Not enough terms", "You need at least 2 terms for a quiz.")
+                return
         else:
-            if choice == correct_def:
-                st.success("Correct! 🎉")
-            else:
-                st.error(f"Incorrect! The correct answer is:\n\n{correct_def}")
+            terms = all_terms
 
-            if st.button("Next"):
-                state["index"] += 1
-                state["show_answer"] = False
-                state["selected_answer"] = None
-                if state["index"] >= len(state["terms"]):
-                    st.success(f"Quiz completed! Your score: {state['score']}/{len(state['terms'])}")
-                    state["quiz_active"] = False
-                    state["index"] = 0
+        QuizWindow(self.root, terms)
 
-        if st.button("Exit Quiz"):
-            if st.confirm("Are you sure you want to exit the quiz?"):
-                state["quiz_active"] = False
-                state["index"] = 0
+class TermSelectionDialog(simpledialog.Dialog):
+    def __init__(self, parent, terms):
+        self.terms = terms
+        self.selected_terms = []
+        super().__init__(parent, title="Select Terms for Quiz")
 
-def main():
-    st.title("Vocabulary Tree Quiz App (Streamlit)")
+    def body(self, frame):
+        tk.Label(frame, text="Select terms to include in quiz:").pack(anchor="w")
 
-    data = load_data()
+        self.vars = []
+        canvas = tk.Canvas(frame)
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+        self.check_frame = tk.Frame(canvas)
 
-    # Sidebar for navigation & management
-    st.sidebar.header("Vocabulary Management")
+        self.check_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
 
-    add_course(data)
+        canvas.create_window((0, 0), window=self.check_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set, height=200)
 
-    course = select_course(data)
-    if course:
-        add_book(data, course)
-        book = select_book(data, course)
-        if book:
-            add_term(data, course, book)
-        else:
-            book = None
-    else:
-        book = None
+        canvas.pack(side=tk.LEFT, fill="both", expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill="y")
 
-    st.sidebar.markdown("---")
-    if course and book:
-        manage_items(data, course, book)
+        for term, definition in self.terms:
+            var = tk.BooleanVar(value=True)
+            cb = tk.Checkbutton(self.check_frame, text=term, variable=var)
+            cb.pack(anchor="w")
+            self.vars.append((var, term, definition))
 
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("© 2025 Vocabulary App")
+        return frame  # initial focus
 
-    st.sidebar.markdown("## Start Quiz")
-    quiz(data, course, book)
+    def apply(self):
+        self.selected_terms = [(term, definition) for var, term, definition in self.vars if var.get()]
+
+class QuizWindow:
+    def __init__(self, master, terms):
+        self.top = tk.Toplevel(master)
+        self.top.title("Quiz")
+        self.top.protocol("WM_DELETE_WINDOW", self.exit_quiz)
+
+        self.terms = terms[:]
+        random.shuffle(self.terms)
+        self.index = 0
+        self.score = 0
+
+        self.question_label = tk.Label(self.top, text="", font=("Arial", 14), wraplength=500, justify="left")
+        self.question_label.pack(pady=10)
+
+        self.var = tk.StringVar()
+        self.options = []
+        for _ in range(4):
+            rb = ttk.Radiobutton(self.top, text="", variable=self.var, value="", style="Quiz.TRadiobutton")
+            rb.pack(anchor="w", padx=20, pady=2)
+            self.options.append(rb)
+
+        btn_frame = tk.Frame(self.top)
+        btn_frame.pack(pady=10)
+
+        self.submit_btn = ttk.Button(btn_frame, text="Submit", command=self.check_answer)
+        self.submit_btn.pack(side=tk.LEFT, padx=5)
+
+        self.next_btn = ttk.Button(btn_frame, text="Next", command=self.next_question)
+        self.next_btn.pack(side=tk.LEFT, padx=5)
+        self.next_btn.config(state="disabled")
+
+        self.exit_btn = ttk.Button(btn_frame, text="Exit Quiz", command=self.exit_quiz)
+        self.exit_btn.pack(side=tk.LEFT, padx=5)
+
+        self.next_question()
+
+    def next_question(self):
+        self.reset_option_styles()
+        if self.index >= len(self.terms):
+            messagebox.showinfo("Quiz Completed", f"You scored {self.score}/{len(self.terms)}.")
+            self.top.destroy()
+            return
+
+        self.current_term, self.correct_def = self.terms[self.index]
+        self.question_label.config(text=f"What is the definition of:\n\n**{self.current_term}**")
+
+        all_defs = [defn for _, defn in self.terms if defn != self.correct_def]
+        choices = random.sample(all_defs, min(3, len(all_defs))) + [self.correct_def]
+        random.shuffle(choices)
+
+        self.var.set(None)
+        for rb, choice in zip(self.options, choices):
+            rb.config(text=choice, value=choice, state="normal", style="Quiz.TRadiobutton")
+
+        self.submit_btn.config(state="normal")
+        self.next_btn.config(state="disabled")
+
+        self.index += 1
+
+    def check_answer(self):
+        selected = self.var.get()
+        if not selected:
+            messagebox.showwarning("Select an answer", "Please select an answer before submitting.")
+            return
+
+        # Disable all options
+        for rb in self.options:
+            rb.config(state="disabled")
+
+        # Highlight correct answer green and selected wrong answer red if any
+        for rb in self.options:
+            if rb.cget("value") == self.correct_def:
+                rb.config(style="Correct.TRadiobutton")
+            elif rb.cget("value") == selected and selected != self.correct_def:
+                rb.config(style="Incorrect.TRadiobutton")
+
+        if selected == self.correct_def:
+            self.score += 1
+
+        self.submit_btn.config(state="disabled")
+        self.next_btn.config(state="normal")
+
+    def reset_option_styles(self):
+        for rb in self.options:
+            rb.config(style="Quiz.TRadiobutton")
+
+    def exit_quiz(self):
+        if messagebox.askyesno("Exit Quiz", "Are you sure you want to exit the quiz?"):
+            self.top.destroy()
+
 
 if __name__ == "__main__":
-    main()
+    root = tk.Tk()
+    app = VocabApp(root)
+    root.mainloop()
