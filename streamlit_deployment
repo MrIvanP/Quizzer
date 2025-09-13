@@ -28,6 +28,26 @@ def save_data(data):
     except Exception as e:
         messagebox.showerror("Save Error", f"Failed to save data: {e}")
 
+# ---------- NEW DIALOG FOR LONG DEFINITIONS ----------
+class DefinitionDialog(simpledialog.Dialog):
+    def __init__(self, parent, title, initial_text=""):
+        self.initial_text = initial_text
+        self.result = None
+        super().__init__(parent, title)
+
+    def body(self, master):
+        tk.Label(master, text="Enter definition:").pack(anchor="w")
+
+        self.text = tk.Text(master, wrap="word", width=80, height=10)  # ~80 chars wide
+        self.text.pack(fill="both", expand=True)
+        self.text.insert("1.0", self.initial_text)
+
+        return self.text
+
+    def apply(self):
+        self.result = self.text.get("1.0", "end-1c").strip()
+# -----------------------------------------------------
+
 class VocabApp:
     def __init__(self, root):
         self.root = root
@@ -58,9 +78,13 @@ class VocabApp:
         ttk.Button(btn_frame, text="Add Course", command=self.add_course).pack(pady=5, fill='x')
         ttk.Button(btn_frame, text="Add Book", command=self.add_book).pack(pady=5, fill='x')
         ttk.Button(btn_frame, text="Add Term", command=self.add_term).pack(pady=5, fill='x')
+        ttk.Button(btn_frame, text="Search Term", command=self.search_terms).pack(pady=5, fill='x')
         ttk.Button(btn_frame, text="Start Quiz", command=self.start_quiz).pack(pady=10, fill='x')
 
+        # Right-click menu
         self.menu = tk.Menu(self.root, tearoff=0)
+        self.menu.add_command(label="View/Edit Definition", command=self.view_edit_definition)
+        self.menu.add_separator()
         self.menu.add_command(label="Add Book", command=self.add_book)
         self.menu.add_command(label="Add Term", command=self.add_term)
         self.menu.add_separator()
@@ -165,13 +189,27 @@ class VocabApp:
             messagebox.showwarning("Duplicate", "Term already exists.")
             return
 
-        definition = simpledialog.askstring("Definition", f"Enter definition for '{term}':")
+        # Use large dialog for definition
+        definition = DefinitionDialog(self.root, f"Definition for '{term}'").result
         if not definition:
             return
 
         self.data[course][book][term] = definition
         save_data(self.data)
         self.build_tree()
+
+    def view_edit_definition(self):
+        course, book, term = self.get_selected_path()
+        if not course or not book or not term:
+            messagebox.showwarning("Select Term", "Select a term to view or edit its definition.")
+            return
+
+        current_def = self.data[course][book].get(term, "")
+        new_def = DefinitionDialog(self.root, f"Definition for '{term}'", initial_text=current_def).result
+        if new_def is not None:
+            self.data[course][book][term] = new_def
+            save_data(self.data)
+            messagebox.showinfo("Updated", f"Definition for '{term}' updated.")
 
     def rename_item(self):
         selected = self.tree.selection()
@@ -271,6 +309,26 @@ class VocabApp:
 
         QuizWindow(self.root, terms)
 
+    def search_terms(self):
+        query = simpledialog.askstring("Search Term", "Enter part of a term to search:")
+        if not query:
+            return
+
+        query = query.lower()
+        results = []
+        for course, books in self.data.items():
+            for book, terms in books.items():
+                for term, definition in terms.items():
+                    if query in term.lower():
+                        results.append((course, book, term, definition))
+
+        if not results:
+            messagebox.showinfo("No Results", f"No terms found matching '{query}'.")
+            return
+
+        SearchWindow(self.root, results, self.data)
+        save_data(self.data)
+
 class TermSelectionDialog(simpledialog.Dialog):
     def __init__(self, parent, terms):
         self.terms = terms
@@ -306,6 +364,42 @@ class TermSelectionDialog(simpledialog.Dialog):
 
     def apply(self):
         self.selected_terms = [(term, definition) for var, term, definition in self.vars if var.get()]
+
+class SearchWindow:
+    def __init__(self, master, results, data):
+        self.top = tk.Toplevel(master)
+        self.top.title("Search Results")
+        self.data = data
+        self.results = results
+
+        tk.Label(self.top, text="Search Results:", font=("Arial", 12, "bold")).pack(pady=5)
+
+        self.listbox = tk.Listbox(self.top, width=60, height=15)
+        self.listbox.pack(padx=10, pady=5)
+
+        for course, book, term, definition in results:
+            self.listbox.insert(tk.END, f"{course} > {book} > {term}")
+
+        btn_frame = tk.Frame(self.top)
+        btn_frame.pack(pady=5)
+
+        tk.Button(btn_frame, text="View/Edit Definition", command=self.edit_selected).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Close", command=self.top.destroy).pack(side=tk.LEFT, padx=5)
+
+    def edit_selected(self):
+        selection = self.listbox.curselection()
+        if not selection:
+            messagebox.showwarning("Select Item", "Please select a term to view/edit.")
+            return
+
+        index = selection[0]
+        course, book, term, definition = self.results[index]
+
+        new_def = DefinitionDialog(self.top, f"Edit Definition for '{term}'", initial_text=definition).result
+
+        if new_def is not None:
+            self.data[course][book][term] = new_def
+            messagebox.showinfo("Updated", f"Definition for '{term}' updated.")
 
 class QuizWindow:
     def __init__(self, master, terms):
@@ -346,7 +440,6 @@ class QuizWindow:
     def next_question(self):
         self.reset_option_styles()
         if self.index >= len(self.terms):
-            messagebox.showinfo("Quiz Completed", f"You scored {self.score}/{len(self.terms)}.")
             self.top.destroy()
             return
 
@@ -396,7 +489,6 @@ class QuizWindow:
     def exit_quiz(self):
         if messagebox.askyesno("Exit Quiz", "Are you sure you want to exit the quiz?"):
             self.top.destroy()
-
 
 if __name__ == "__main__":
     root = tk.Tk()
