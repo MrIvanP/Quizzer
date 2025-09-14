@@ -58,6 +58,14 @@ class VocabApp:
         self.setup_ui()
         self.build_tree()
 
+    def on_double_click(self, event):
+        item = self.tree.selection()
+        if not item:
+            return
+        course, book, term = self.get_selected_path()
+        if course and book and term:
+            self.view_edit_definition()
+
     def setup_styles(self):
         self.style = ttk.Style()
         self.style.configure("Quiz.TRadiobutton", background="white")
@@ -92,6 +100,7 @@ class VocabApp:
         self.menu.add_command(label="Delete", command=self.delete_item)
 
         self.tree.bind("<Button-3>", self.show_context_menu)
+        self.tree.bind("<Double-1>", self.on_double_click)
 
     def build_tree(self):
         self.tree.delete(*self.tree.get_children())
